@@ -1,0 +1,61 @@
+name: Build ProductProbe Universal dylib
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'Probe.m'
+      - '.github/workflows/build.yml'
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        shell: bash
+        run: |
+          set -euxo pipefail
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-path
+
+      - name: Build arm64 and arm64e universal dylib
+        shell: bash
+        run: |
+          set -euxo pipefail
+          SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
+          COMMON=(
+            -isysroot "$SDK"
+            -miphoneos-version-min=14.0
+            -fobjc-arc
+            -fmodules
+            -O2
+            -dynamiclib
+            -framework UIKit
+            -framework Foundation
+            -framework QuartzCore
+            -install_name '@rpath/ProductProbe.dylib'
+            Probe.m
+          )
+
+          xcrun clang -arch arm64 "${COMMON[@]}" -o ProductProbe-arm64.dylib
+          xcrun clang -arch arm64e "${COMMON[@]}" -o ProductProbe-arm64e.dylib
+
+          xcrun lipo -create \
+            ProductProbe-arm64.dylib \
+            ProductProbe-arm64e.dylib \
+            -output ProductProbe.dylib
+
+          codesign --force --sign - ProductProbe.dylib
+          file ProductProbe.dylib
+          xcrun lipo -info ProductProbe.dylib
+          shasum -a 256 ProductProbe.dylib | tee ProductProbe.sha256
+
+      - name: Upload dylib
+        uses: actions/upload-artifact@v4
+        with:
+          name: ProductProbe-Universal
+          path: |
+            ProductProbe.dylib
+            ProductProbe.sha256
